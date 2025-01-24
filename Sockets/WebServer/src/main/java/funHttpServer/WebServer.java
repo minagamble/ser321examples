@@ -8,7 +8,9 @@ You can also do some other simple GET requests:
 4) /multiply?num1=3&num2=4 multiplies the two inputs and responses with the result
 5) /github?query=users/amehlhase316/repos (or other GitHub repo owners) will lead to receiving
    JSON which will for now only be printed in the console. See the todo below
-
+My request: 
+1) /calculateAreaRectangle?length=5&width=10
+2 /calculateDaysBetween?start=2025-01-01&end=2025-12-31
 The reading of the request is done "manually", meaning no library that helps making things a 
 little easier is used. This is done so you see exactly how to pars the request and 
 write a response back
@@ -25,7 +27,12 @@ import java.util.Random;
 import java.util.Map;
 import java.util.LinkedHashMap;
 import java.nio.charset.Charset;
-
+import org.json.JSONArray;
+import org.json.JSONObject;
+import org.json.JSONException;
+import java.time.LocalDate;
+import java.time.format.DateTimeParseException;
+import java.time.temporal.ChronoUnit;
 class WebServer {
   public static void main(String args[]) {
     WebServer server = new WebServer(9000);
@@ -61,7 +68,7 @@ class WebServer {
         try {
           server.close();
         } catch (IOException e) {
-          // TODO Auto-generated catch block
+           System.err.println("IOException occurred while closing the server socket: " + e.getMessage());
           e.printStackTrace();
         }
       }
@@ -198,9 +205,13 @@ class WebServer {
           // wrong data is given this just crashes
 
           Map<String, String> query_pairs = new LinkedHashMap<String, String>();
+		  try {
           // extract path parameters
           query_pairs = splitQuery(request.replace("multiply?", ""));
-
+		  
+          if (!query_pairs.containsKey("num1") || !query_pairs.containsKey("num2")) {
+            throw new IllegalArgumentException("Missing required parameters 'num1' or 'num2'.");
+          }
           // extract required fields from parameters
           Integer num1 = Integer.parseInt(query_pairs.get("num1"));
           Integer num2 = Integer.parseInt(query_pairs.get("num2"));
@@ -213,9 +224,22 @@ class WebServer {
           builder.append("Content-Type: text/html; charset=utf-8\n");
           builder.append("\n");
           builder.append("Result is: " + result);
-
-          // TODO: Include error handling here with a correct error code and
-          // a response that makes sense
+		  }catch (NumberFormatException e) {
+			builder.append("HTTP/1.1 400 Bad Request\n");
+			builder.append("Content-Type: text/html; charset=utf-8\n");
+			builder.append("\n");
+			builder.append("Error: One or both of the parameters 'num1' or 'num2' are not valid integers.");
+		  } catch (IllegalArgumentException e) {
+			builder.append("HTTP/1.1 400 Bad Request\n");
+			builder.append("Content-Type: text/html; charset=utf-8\n");
+			builder.append("\n");
+			builder.append("Error: " + e.getMessage());
+		  } catch (Exception e) {
+			builder.append("HTTP/1.1 500 Internal Server Error\n");
+			builder.append("Content-Type: text/html; charset=utf-8\n");
+			builder.append("\n");
+			builder.append("Error: An unexpected error occurred.");
+		  }
 
         } else if (request.contains("github?")) {
           // pulls the query from the request and runs it with GitHub's REST API
@@ -226,19 +250,128 @@ class WebServer {
           // "Owner's repo is named RepoName. Example: find RepoName's contributors" translates to
           //     "/repos/OWNERNAME/REPONAME/contributors"
 
-          Map<String, String> query_pairs = new LinkedHashMap<String, String>();
-          query_pairs = splitQuery(request.replace("github?", ""));
-          String json = fetchURL("https://api.github.com/" + query_pairs.get("query"));
-          System.out.println(json);
+    Map<String, String> query_pairs = new LinkedHashMap<String, String>();
+    query_pairs = splitQuery(request.replace("github?", ""));
+    String json = fetchURL("https://api.github.com/" + query_pairs.get("query"));
+    // System.out.println(json);
+    try {
+        JSONArray jsonArray = new JSONArray(json);
+        StringBuilder responseBuilder = new StringBuilder();
 
-          builder.append("HTTP/1.1 200 OK\n");
-          builder.append("Content-Type: text/html; charset=utf-8\n");
-          builder.append("\n");
-          builder.append("Check the todos mentioned in the Java source file");
-          // TODO: Parse the JSON returned by your fetch and create an appropriate
-          // response based on what the assignment document asks for
 
-        } else {
+        // Append HTTP status and headers
+        responseBuilder.append("HTTP/1.1 200 OK\n");
+        responseBuilder.append("Content-Type: text/html; charset=utf-8\n");
+        responseBuilder.append("\n");
+
+
+        // Build HTML content
+        responseBuilder.append("<h1>GitHub Repositories</h1><ul>");
+        System.out.println(jsonArray.length());
+        for (int i = 0; i < jsonArray.length(); i++) {
+            JSONObject repo = jsonArray.getJSONObject(i);
+            String fullName = repo.getString("full_name");
+            System.out.println(fullName);
+            int id = repo.getInt("id");
+            JSONObject owner = repo.getJSONObject("owner");
+            String ownerLogin = owner.getString("login");
+
+
+            responseBuilder.append("<li>");
+            responseBuilder.append("<strong>Full Name:</strong> ").append(fullName).append("<br>");
+            responseBuilder.append("<strong>ID:</strong> ").append(id).append("<br>");
+            responseBuilder.append("<strong>Owner Login:</strong> ").append(ownerLogin);
+            responseBuilder.append("</li>");
+        }
+        responseBuilder.append("</ul>");
+
+
+        builder.append(responseBuilder.toString());
+
+
+    } catch (JSONException e) {
+        builder.append("HTTP/1.1 500 Internal Server Error\n");
+        builder.append("Content-Type: text/html; charset=utf-8\n");
+        builder.append("\n");
+        builder.append("Error: Unable to parse JSON response.");
+    } catch (Exception e) {
+        builder.append("HTTP/1.1 500 Internal Server Error\n");
+        builder.append("Content-Type: text/html; charset=utf-8\n");
+        builder.append("\n");
+        builder.append("Error: An unexpected error occurred.");
+        System.err.println("Unexpected error: " + e.getMessage());
+        e.printStackTrace();
+    }
+}else if (request.contains("calculateAreaRectangle?")) {
+	Map<String, String> query_pairs = new LinkedHashMap<String, String>();
+    query_pairs = splitQuery(request.replace("calculateAreaRectangle?", ""));
+	try {
+        // Check for missing parameters
+        if (!query_pairs.containsKey("length") || !query_pairs.containsKey("width")){
+            throw new IllegalArgumentException("Missing required length or width parameters.");
+        }
+		double length = Double.parseDouble(query_pairs.get("length"));
+        double width = Double.parseDouble(query_pairs.get("width"));
+		double area = length * width;
+        builder.append("HTTP/1.1 200 OK\n");
+        builder.append("Content-Type: text/html; charset=utf-8\n");
+        builder.append("\n");
+        builder.append("The area is: ").append(area);
+	}catch (NumberFormatException e) {
+        builder.append("HTTP/1.1 400 Bad Request\n");
+        builder.append("Content-Type: text/html; charset=utf-8\n");
+        builder.append("\n");
+        builder.append("Error: Invalid number format for length or width.");
+    } catch (IllegalArgumentException e) {
+        builder.append("HTTP/1.1 400 Bad Request\n");
+        builder.append("Content-Type: text/html; charset=utf-8\n");
+        builder.append("\n");
+        builder.append("Error: " + e.getMessage());
+    } catch (Exception e) {
+        builder.append("HTTP/1.1 500 Internal Server Error\n");
+        builder.append("Content-Type: text/html; charset=utf-8\n");
+        builder.append("\n");
+        builder.append("Error: An unexpected error occurred.");
+    }
+}else if (request.contains("calculateDaysBetween?")) {
+    Map<String, String> query_pairs = new LinkedHashMap<String, String>();
+    query_pairs = splitQuery(request.replace("calculateDaysBetween?", ""));
+
+    try {
+        // Check for missing parameters
+        if (!query_pairs.containsKey("start") || !query_pairs.containsKey("end")) {
+            throw new IllegalArgumentException("Missing required start or end date parameters.");
+        }
+
+        LocalDate startDate = LocalDate.parse(query_pairs.get("start"));
+        LocalDate endDate = LocalDate.parse(query_pairs.get("end"));
+
+        long daysBetween = ChronoUnit.DAYS.between(startDate, endDate);
+
+        // Construct response
+        builder.append("HTTP/1.1 200 OK\n");
+        builder.append("Content-Type: text/html; charset=utf-8\n");
+        builder.append("\n");
+        builder.append("The number of days between the dates is: ").append(daysBetween).append(" days.");
+
+    } catch (DateTimeParseException e) {
+        builder.append("HTTP/1.1 400 Bad Request\n");
+        builder.append("Content-Type: text/html; charset=utf-8\n");
+        builder.append("\n");
+        builder.append("Error: Invalid date format. Please use YYYY-MM-DD.");
+    } catch (IllegalArgumentException e) {
+        builder.append("HTTP/1.1 400 Bad Request\n");
+        builder.append("Content-Type: text/html; charset=utf-8\n");
+        builder.append("\n");
+        builder.append("Error: " + e.getMessage());
+    } catch (Exception e) {
+        builder.append("HTTP/1.1 500 Internal Server Error\n");
+        builder.append("Content-Type: text/html; charset=utf-8\n");
+        builder.append("\n");
+        builder.append("Error: An unexpected error occurred.");
+    }
+}
+ else {
           // if the request is not recognized at all
 
           builder.append("HTTP/1.1 400 Bad Request\n");
